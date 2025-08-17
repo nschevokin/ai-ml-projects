@@ -1,0 +1,136 @@
+include "globals.mzn";
+
+% ===================== Parameters =====================
+int: number;                      % even number of teams
+constraint number mod 2 = 0;
+
+set of int: Teams = 1..number;
+int: weeks   = number - 1;
+int: periods = number div 2;
+int: m       = number * (number - 1) div 2;   % # unordered pairs (matches)
+
+% Unordered pairs in lexicographic order (i<j) 
+array[1..m] of int: A = [ i | i in 1..number-1, j in i+1..number ];
+array[1..m] of int: B = [ j | i in 1..number-1, j in i+1..number ];
+
+% Index of pair (i,j) in [A,B] (i<j)
+function int: pair_index(int: i, int: j) =
+  (i-1)*number - ((i-1)*i) div 2 + (j - i);
+
+% Positive modulus helper (avoid negative residues)
+function int: posmod(int: a, int: m) =
+  let { int: r = a mod m } in if r >= 0 then r else r + m endif;
+
+% ===================== Circle method (inside model) ===================== 
+function int: ring(int: k, int: r, int: m1) = posmod(k - 1 - r, m1) + 2;
+
+array[1..weeks, 1..periods] of int: PID =
+  array2d(1..weeks, 1..periods,
+    [ let {
+        int: r  = w - 1;
+        int: m1 = number - 1;
+        int: a_raw = if s = 1 then 1 else ring(s-1, r, m1) endif;
+        int: b_raw = if s = 1 then ring(m1, r, m1) else ring(m1-(s-1), r, m1) endif;
+        int: i = if a_raw <= b_raw then a_raw else b_raw endif;
+        int: j = if a_raw <= b_raw then b_raw else a_raw endif
+      } in pair_index(i, j)
+      | w in 1..weeks, s in 1..periods
+    ]);
+
+% ===================== Decision variables =====================
+array[1..m] of var 1..periods: P;        % period chosen for each match
+array[1..m] of var bool:       H;        % true => A[k] home, false => B[k] home
+array[Teams, 1..periods] of var 0..2: C;  % team-by-period counts (<=2; zeros allowed)
+
+% ===================== Core constraints =====================
+
+% C1: in each week, periods form a permutation
+constraint
+  forall(w in 1..weeks)(
+    alldifferent([ P[PID[w,s]] | s in 1..periods ])
+  );
+
+% C2: tie each team’s period counts to P
+constraint
+  forall(t in Teams)(
+    global_cardinality(
+      [ P[pair_index(i, t)] | i in 1..t-1 ] ++
+      [ P[pair_index(t, j)] | j in t+1..number ],
+      [ p | p in 1..periods ],
+      [ C[t,p] | p in 1..periods ]
+    )
+  );
+
+% C3: fairness bound
+constraint forall(t in Teams, p in 1..periods)( C[t,p] <= 2 );
+
+% Redundant equalities for propagation
+constraint forall(t in Teams)( sum(p in 1..periods)( C[t,p] ) = weeks );
+constraint forall(p in 1..periods)( sum(t in Teams)( C[t,p] ) = 2*weeks );
+
+% Home/away balance
+array[Teams] of var 0..weeks: home_cnt;
+array[Teams] of var 0..weeks: away_cnt;
+
+constraint
+    forall(t in Teams)(
+        home_cnt[t] =
+            sum(k in 1..m where A[k] = t)( bool2int(H[k]) ) +
+            sum(k in 1..m where B[k] = t)( bool2int(not H[k]) )
+    );
+
+constraint
+    forall(t in Teams)(
+        away_cnt[t] =
+            sum(k in 1..m where A[k] = t)( bool2int(not H[k]) ) +
+            sum(k in 1..m where B[k] = t)( bool2int(H[k]) )
+    );
+
+array[Teams] of var 0..weeks: absdiff =
+    [ abs(home_cnt[t] - away_cnt[t]) | t in Teams ];
+
+var 0..weeks: max_absdiff = max(absdiff);
+
+% ===================== Symmetry breaking =====================
+% SB1 — Week-1 canon
+constraint forall(s in 1..periods)( P[PID[1,s]] = s );
+
+% SB2 
+constraint H[ PID[1,1] ] = true; 
+
+
+% ===================== Search =====================
+array[1..weeks + weeks*(periods-1)] of var 1..periods: P_order =
+  [ P[PID[w,1]] | w in 1..weeks ] ++
+  [ P[PID[w,s]] | w in 1..weeks, s in 2..periods ];
+
+solve
+  :: restart_luby(64)
+  :: seq_search([
+       int_search(P_order, first_fail, indomain_min, complete),
+       int_search([ C[t,p] | t in Teams, p in 1..periods ],
+                  input_order, indomain_max, complete),
+       bool_search(H, input_order, indomain_split, complete)
+     ])
+  minimize max_absdiff;
+
+% ============================================================
+% OUTPUT
+% ============================================================
+output [
+  "Week " ++ show(w) ++ ": " ++
+  concat([
+    let {
+      set of int: S = { ss | ss in 1..periods where fix(P[PID[w,ss]]) = p },
+      int: s = min(S),                 % S has exactly one element
+      int: k = PID[w,s],
+      int: a = A[k],
+      int: b = B[k]
+    } in
+      (if fix(H[k]) then show(a) ++ "-" ++ show(b)
+       else               show(b) ++ "-" ++ show(a) endif)
+      ++ if p < periods then "   " else "" endif
+    | p in 1..periods
+  ]) ++ "\n"
+  | w in 1..weeks
+]
