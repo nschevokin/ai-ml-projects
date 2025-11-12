@@ -3,13 +3,13 @@
 
 ---
 
-## 🧭 Overview  
+## Overview  
 This project focuses on transforming **normalised 3D car meshes** into **algorithm-friendly point clouds**, implementing a multi-step 3D data preprocessing pipeline in **Python + Open3D**.  
 The workflow ensures surface uniformity, removes interior points, and refines the resulting geometry for subsequent computer vision or shape analysis tasks.
 
 ---
 
-## ⚙️ Pipeline  
+## Pipeline  
 
 ### 1️⃣ Resampling  
 **`resampling(mesh)`** — applies Poisson disk sampling and optional voxel downsampling.  
@@ -29,7 +29,7 @@ The workflow ensures surface uniformity, removes interior points, and refines th
 
 ---
 
-## 🧠 Design Parameters  
+## Design Parameters  
 | Parameter | Value | Description |
 |------------|--------|-------------|
 | `VIEWS` | 64 | Number of virtual camera viewpoints |
@@ -39,7 +39,7 @@ The workflow ensures surface uniformity, removes interior points, and refines th
 
 ---
 
-## 📈 Output  
+## Output  
 Each processed car mesh yields:  
 1. **Exterior-only point cloud** (surface visible from outside).  
 2. **Uniform & smoothed surface point cloud** (refined for 3D ML algorithms).  
